@@ -10,5 +10,7 @@
 ./backend/logs/error.log
 ./backend/logs/access.log
 ./backend/logs/combined.log
-backend/.env
 .env
+backend/.env
+**/__pycache__/
+**/*.pyc
