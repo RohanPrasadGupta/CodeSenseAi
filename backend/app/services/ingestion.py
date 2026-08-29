@@ -7,6 +7,8 @@ from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import UploadFile, HTTPException
 from app.models.repo import Repo, RepoFile, RepoStatus
+from app.services.parser import parse_file
+from app.models.repo import CodeChunkModel
 
 
 LANGUAGE_MAP = {
@@ -119,6 +121,7 @@ async def process_zip_upload(file: UploadFile, db: AsyncSession) -> Repo:
 
         collected_files.append({
             "file_path": str(path.relative_to(temp_dir)),
+            "file_path_absolute": str(path),
             "language": detect_language(path),
             "size_bytes": path.stat().st_size,
         })
@@ -143,6 +146,23 @@ async def process_zip_upload(file: UploadFile, db: AsyncSession) -> Repo:
             size_bytes=f["size_bytes"],
         )
         db.add(repo_file)
+    
+    for f in collected_files:
+        if f["language"] is None:
+            continue
+        chunks = parse_file(f["file_path_absolute"], f["language"])
+        for chunk in chunks:
+            db.add(CodeChunkModel(
+                repo_id=repo.id,
+                file_path=chunk.file_path,
+                language=chunk.language,
+                type=chunk.type,
+                name=chunk.name,
+                start_line=chunk.start_line,
+                end_line=chunk.end_line,
+                code=chunk.code,
+                parent=chunk.parent,
+            ))
     await db.commit()
 
     shutil.rmtree(temp_dir, ignore_errors=True) # clean up the temporary directory
@@ -198,6 +218,7 @@ async def process_url_upload(url:str,db:AsyncSession) -> Repo:
 
             collected_files.append({
                 "file_path": str(path.relative_to(temp_dir)),
+                "file_path_absolute": str(path),
                 "language": detect_language(path),
                 "size_bytes": path.stat().st_size,
             })
@@ -222,6 +243,23 @@ async def process_url_upload(url:str,db:AsyncSession) -> Repo:
                 size_bytes = f["size_bytes"],
             )
             db.add(repo_file)
+        
+        for f in collected_files:
+            if f["language"] is None:
+                continue
+            chunks = parse_file(f["file_path_absolute"], f["language"])
+            for chunk in chunks:
+                db.add(CodeChunkModel(
+                    repo_id=repo.id,
+                    file_path=chunk.file_path,
+                    language=chunk.language,
+                    type=chunk.type,
+                    name=chunk.name,
+                    start_line=chunk.start_line,
+                    end_line=chunk.end_line,
+                    code=chunk.code,
+                    parent=chunk.parent,
+                ))
         await db.commit()
 
         return repo

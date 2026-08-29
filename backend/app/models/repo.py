@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     Enum as SAEnum,
     ForeignKey,
+    Text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -71,6 +72,12 @@ class Repo(Base):
         cascade="all, delete-orphan",
     )
 
+    chunks: Mapped[list["CodeChunkModel"]] = relationship(
+        "CodeChunkModel",
+        back_populates="repo",
+        cascade="all, delete-orphan",
+)
+
 
 class RepoFile(Base):
     __tablename__ = "repo_files"
@@ -112,4 +119,61 @@ class RepoFile(Base):
     repo: Mapped["Repo"] = relationship(
         "Repo",
         back_populates="files",
+    )
+
+class CodeChunkModel(Base):
+    __tablename__ = "code_chunks"
+
+    id : Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    repo: Mapped["Repo"] = relationship(
+        "Repo",
+        back_populates="chunks",
+        )
+
+    repo_id : Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("repos.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    file_path : Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+    )
+    language : Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+    )
+    type : Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+    )
+    name : Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+    )
+    start_line : Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    end_line : Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    code : Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+    parent : Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+    )
+    created_at : Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
     )
