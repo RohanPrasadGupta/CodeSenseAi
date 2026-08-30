@@ -13,6 +13,7 @@ class Settings(BaseSettings):
 
     ANTHROPIC_API_KEY: str = ""
     PINECONE_API_KEY: str = ""
+    PINECONE_INDEX_NAME: str = ""
     VOYAGE_API_KEY: str = ""
 
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]

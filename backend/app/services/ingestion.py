@@ -9,6 +9,7 @@ from fastapi import UploadFile, HTTPException
 from app.models.repo import Repo, RepoFile, RepoStatus
 from app.services.parser import parse_file
 from app.models.repo import CodeChunkModel
+from app.services.embedder import embed_chunks
 
 
 LANGUAGE_MAP = {
@@ -147,10 +148,12 @@ async def process_zip_upload(file: UploadFile, db: AsyncSession) -> Repo:
         )
         db.add(repo_file)
     
+    all_chunks = []
     for f in collected_files:
         if f["language"] is None:
             continue
         chunks = parse_file(f["file_path_absolute"], f["language"])
+        all_chunks.extend(chunks)
         for chunk in chunks:
             db.add(CodeChunkModel(
                 repo_id=repo.id,
@@ -163,7 +166,9 @@ async def process_zip_upload(file: UploadFile, db: AsyncSession) -> Repo:
                 code=chunk.code,
                 parent=chunk.parent,
             ))
+
     await db.commit()
+    await embed_chunks(all_chunks, str(repo.id))  # ← embed after saving
 
     shutil.rmtree(temp_dir, ignore_errors=True) # clean up the temporary directory
     return repo
@@ -244,10 +249,12 @@ async def process_url_upload(url:str,db:AsyncSession) -> Repo:
             )
             db.add(repo_file)
         
+        all_chunks = []
         for f in collected_files:
             if f["language"] is None:
                 continue
             chunks = parse_file(f["file_path_absolute"], f["language"])
+            all_chunks.extend(chunks)
             for chunk in chunks:
                 db.add(CodeChunkModel(
                     repo_id=repo.id,
@@ -260,7 +267,9 @@ async def process_url_upload(url:str,db:AsyncSession) -> Repo:
                     code=chunk.code,
                     parent=chunk.parent,
                 ))
+
         await db.commit()
+        await embed_chunks(all_chunks, str(repo.id))  # ← embed after saving
 
         return repo
 
