@@ -1,9 +1,9 @@
 # CodeSense AI — Backend
 
-FastAPI service that ingests repositories, stores file metadata, and parses source into named code chunks (functions and classes).
+FastAPI service that ingests repositories, parses source into named code chunks, embeds them in Pinecone, and answers questions with cited sources.
 
 **Version:** 0.1.0  
-**Python:** 3.12+  
+**Python:** 3.12+ (below 3.15)  
 **App name:** CodeSense AI
 
 This is the API and setup reference for frontend and backend work. Product overview and roadmap live in the [root README](../README.md).
@@ -17,14 +17,14 @@ This is the API and setup reference for frontend and backend work. Product overv
 | 0 | Infrastructure — FastAPI, PostgreSQL (Neon), Alembic, `/health` | Done |
 | 1 | Repository ingestion — ZIP + GitHub URL, `repos` + `repo_files` | Done |
 | 2 | Tree-sitter parsing — Python, JS, TS, Go → `code_chunks` | Done |
-| 3 | Embeddings + Pinecone (Voyage `voyage-code-3`) | Upcoming |
-| 4 | RAG Q&A — `POST /repos/{id}/ask` | Upcoming |
+| 3 | Embeddings + Pinecone (Voyage `voyage-code-3`) | Done |
+| 4 | RAG Q&A — `GET /repos/{id}/ask` | Done |
 | 5 | LangGraph agents (review, architecture, docs) | Upcoming |
-| 6 | React frontend | Upcoming |
+| 6 | React frontend — ingest UI live; chat / file tree / agents not yet | In progress |
 | 7 | JWT auth, ARQ + Redis, Render + Netlify | Upcoming |
 
-**Usable from a client today:** `GET /health`, `POST /repos/upload`, `POST /repos/from-url`.  
-Files and chunks are written to Postgres but **not exposed** by any read API yet. No auth.
+**Usable from a client today:** `GET /health`, `POST /repos/upload`, `POST /repos/from-url`, `GET /repos/{id}/ask`.  
+Files and chunks are written to Postgres but **not exposed** by any read API. No auth.
 
 ---
 
@@ -36,6 +36,9 @@ Files and chunks are written to Postgres but **not exposed** by any read API yet
 - Alembic migrations
 - Tree-sitter (Python, JavaScript, TypeScript, Go)
 - python-multipart (ZIP uploads)
+- Voyage AI (`voyage-code-3`) — embeddings
+- Pinecone — vector index, namespace per repo
+- Anthropic Claude (`claude-haiku-4-5`) — RAG answers
 
 ---
 
@@ -54,13 +57,15 @@ DEBUG=true
 ENVIRONMENT=development
 CORS_ORIGINS=["http://localhost:3000"]
 
-# Unused until Phases 3–4
-ANTHROPIC_API_KEY=
-PINECONE_API_KEY=
 VOYAGE_API_KEY=
+PINECONE_API_KEY=
+PINECONE_INDEX_NAME=
+ANTHROPIC_API_KEY=
 ```
 
-`DATABASE_URL` is required. Use the SQLAlchemy async form (`postgresql+asyncpg://...`).
+`DATABASE_URL` is required for boot. Voyage, Pinecone, and Anthropic keys are required for ingest embeddings and Q&A.
+
+Use the SQLAlchemy async form (`postgresql+asyncpg://...`). Create the Pinecone index in the Pinecone console first and set `PINECONE_INDEX_NAME` to that name. Dimension must match Voyage `voyage-code-3`.
 
 ```bash
 poetry run alembic upgrade head
@@ -86,11 +91,13 @@ backend/
 │   ├── database.py             # async engine, sessions
 │   ├── api/routes/
 │   │   ├── health.py           # GET /health
-│   │   └── repos.py            # POST /repos/upload, /from-url
+│   │   └── repos.py            # upload, from-url, ask
 │   ├── models/repo.py          # Repo, RepoFile, CodeChunkModel
 │   └── services/
-│       ├── ingestion.py        # ZIP + GitHub walk/save
-│       └── parser.py           # Tree-sitter extract_chunks
+│       ├── ingestion.py        # ZIP + GitHub walk/save + embed
+│       ├── parser.py           # Tree-sitter extract_chunks
+│       ├── embedder.py         # Voyage batch embed → Pinecone upsert
+│       └── qa.py               # embed question → Pinecone → Claude
 ├── alembic/versions/           # schema migrations
 └── pyproject.toml
 ```
@@ -125,9 +132,9 @@ App + database ping. Always HTTP **200**, even if the database is down (`status:
 
 ### `POST /repos/upload`
 
-Ingest a ZIP. **201**. `multipart/form-data`, field name **`file`**.
+Ingest a ZIP, parse chunks, embed into Pinecone. **201**. `multipart/form-data`, field name **`file`**.
 
-The request stays open until extract, parse, and DB writes finish. Show a loading state on the client.
+The request stays open until extract, parse, DB writes, and embedding finish. Show a loading state on the client.
 
 ```bash
 curl -X POST http://localhost:8000/repos/upload \
@@ -169,7 +176,7 @@ const res = await fetch("http://localhost:8000/repos/upload", {
 
 ### `POST /repos/from-url`
 
-Clone a **public** GitHub repo (`git clone --depth 1`). **201**. JSON body.
+Clone a **public** GitHub repo (`git clone --depth 1`), parse, embed. **201**. JSON body.
 
 URL must start with `https://github.com/`.
 
@@ -198,6 +205,58 @@ await fetch("http://localhost:8000/repos/from-url", {
 
 ---
 
+### `GET /repos/{repo_id}/ask`
+
+Ask a question about an ingested repo. Query param **`question`** (required).
+
+Flow: embed the question with Voyage → search that repo’s Pinecone namespace (`top_k=5`) → Claude Haiku answers using only retrieved code.
+
+```bash
+curl "http://localhost:8000/repos/3ebf8141-cf59-4308-ad3c-5185f40b90b1/ask?question=How%20does%20auth%20work"
+```
+
+```ts
+const params = new URLSearchParams({ question });
+const res = await fetch(
+  `http://localhost:8000/repos/${repoId}/ask?${params}`,
+);
+```
+
+**200**
+
+```json
+{
+  "answer": "Auth hashes the password in userServices.js and issues a token on login.",
+  "sources": [
+    {
+      "file_path": "services/userServices.js",
+      "name": "<anonymous>",
+      "start_line": 40,
+      "end_line": 112
+    }
+  ]
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `answer` | string | Claude’s reply; cites file/function when possible |
+| `sources` | array | Up to 5 Pinecone matches used as context |
+| `sources[].file_path` | string | Path stored at embed time |
+| `sources[].name` | string | Function/class name, or `"<anonymous>"` |
+| `sources[].start_line` | number | 1-based |
+| `sources[].end_line` | number | 1-based |
+
+| Status | When |
+|---|---|
+| 422 | Missing `question` query param |
+
+There is no check that `repo_id` exists in Postgres. An unknown id queries an empty Pinecone namespace; Claude will typically say the answer is not in the context. Sources may be an empty array.
+
+Long questions go in the query string (URL length limits apply).
+
+---
+
 ## Types (frontend)
 
 ```ts
@@ -213,6 +272,18 @@ interface Repo {
   updated_at: string;
 }
 
+interface AskSource {
+  file_path: string;
+  name: string;
+  start_line: number;
+  end_line: number;
+}
+
+interface AskResponse {
+  answer: string;
+  sources: AskSource[];
+}
+
 interface ErrorResponse {
   detail: string | Array<{ loc: (string | number)[]; msg: string; type: string }>;
 }
@@ -221,6 +292,40 @@ interface ErrorResponse {
 `PENDING` / `FAILED` exist on the model. Current ingest handlers return `INGESTED` or raise HTTP errors — there is no job polling.
 
 Keep `repo.id` in client state. There is no `GET /repos` or `GET /repos/{id}`.
+
+---
+
+## Embeddings (Phase 3)
+
+After chunks are saved, `embed_chunks()` runs for both ZIP and GitHub ingest.
+
+- Model: Voyage **`voyage-code-3`**
+- Batch size: 50
+- Pinecone namespace: `repo_{repo_id}`
+- Vector id: `{repo_id}-{uuid}`
+- Embedded text: `file`, `type`, `name`, then the chunk source
+
+Pinecone metadata per vector:
+
+| Key | Value |
+|---|---|
+| `repo_id` | Repo UUID string |
+| `file_path` | Chunk path |
+| `name` | Function/class name |
+| `type` | `"function"` or `"class"` |
+| `start_line` / `end_line` | Line range |
+| `code` | Full chunk source (used as RAG context) |
+
+---
+
+## RAG (Phase 4)
+
+`answer_question()`:
+
+1. Embed the question with `voyage-code-3`
+2. `index.query` in `repo_{repo_id}`, `top_k=5`, `include_metadata=true`
+3. Build context from each match’s file, name, lines, and code
+4. Call **`claude-haiku-4-5`** (`max_tokens=1024`) with a system prompt that answers only from that context and cites file + function
 
 ---
 
@@ -263,7 +368,7 @@ Keep `repo.id` in client state. There is no `GET /repos` or `GET /repos/{id}`.
 | `parent` | string \| null | Enclosing class/function name |
 | `created_at` | timestamptz | |
 
-Parsing runs only for **python, javascript, typescript, go**. Other languages are stored as files only.
+Parsing runs only for **python, javascript, typescript, go**. Other languages are stored as files only (and are not embedded).
 
 ---
 
@@ -310,8 +415,5 @@ Unknown extensions get `language: null` (e.g. `package.json`).
 - `GET /repos`, `GET /repos/{id}`
 - File tree / file contents endpoints
 - Chunk list endpoints
-- `POST /repos/{id}/ask` (Phase 4)
 - Agent endpoints (Phase 5)
 - Auth, background jobs, progress/status polling (Phase 7)
-
-Config already has `ANTHROPIC_API_KEY`, `PINECONE_API_KEY`, and `VOYAGE_API_KEY` for Phases 3–4. They are unused now.
