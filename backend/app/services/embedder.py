@@ -38,7 +38,8 @@ async def embed_chunks(chunks: list, repo_id: str) -> int:
                     "name": chunk.name,
                     "type": chunk.type,
                     "start_line": chunk.start_line,
-                    "end_line": chunk.end_line,
+                    "end_line": chunk.end_line, 
+                    "code": chunk.code,
                 },
             })
         
