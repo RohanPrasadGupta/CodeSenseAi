@@ -43,16 +43,19 @@ For API contracts, env vars, data models, and local backend setup, see **[backen
 - `GET /repos/{id}/ask?question=...`
 - Question → embed → search Pinecone (top 5) → Claude answers with sources
 
+**Phase 5 — LangGraph Agents**
+- `POST /repos/{id}/agents/review` — Code Review Agent (bugs, security, severity, line numbers)
+- `POST /repos/{id}/agents/docs` — Documentation Agent (docstrings for a file, or a repo README)
+- `POST /repos/{id}/agents/architecture` — Architecture Agent (components, dependencies, Mermaid diagram)
+- Read APIs: `GET /repos`, `GET /repos/{id}`, `GET /repos/{id}/files`, `GET /repos/{id}/files/content?path=`
+- File contents are now stored in `repo_files.content`, and chunk paths are repo-relative
+
 ### Upcoming
 
-**Phase 5 — LangGraph Agents**
-- Code Review Agent
-- Architecture Explanation Agent
-- Documentation Generation Agent
-
-**Phase 6 — React Frontend** (in progress)
-- Done: upload page, health badge, session history (localStorage)
-- Still to do: file tree, chat interface, agent panel
+**Phase 6 — Frontend** (done — Next.js 16 / React 19 / TypeScript, not Vite)
+- Home: ZIP dropzone + GitHub URL form, repo list from `GET /repos`
+- Repo dashboard at `/repos/[id]`: file tree, Shiki-highlighted code viewer, grounded chat with clickable sources, agent panel (review, docs, architecture with Mermaid diagram)
+- TanStack Query for all API calls
 
 **Phase 7 — Auth + Background Jobs + Deployment**
 - JWT auth
@@ -63,7 +66,7 @@ For API contracts, env vars, data models, and local backend setup, see **[backen
 
 ## What works today
 
-Ingest a repo, then ask questions about it. Files and chunks stay in Postgres; vectors live in Pinecone. There is still no list/get/delete of repos, no file-tree API, and no auth.
+Ingest a repo, ask questions about it, browse its files, and run the three LangGraph agents. Files and chunks stay in Postgres; vectors live in Pinecone. Repos can be deleted (vectors and all DB rows). There is no auth.
 
 | Method | Path | Description |
 |---|---|---|
@@ -107,7 +110,7 @@ localhost:3000              localhost:8000
                             { answer, sources[] }
 ```
 
-Later: LangGraph agents, JWT, background jobs.
+Agents (`/repos/{id}/agents/*`) run LangGraph graphs for review, docs and architecture. Later: JWT, background jobs.
 
 ---
 
@@ -135,7 +138,7 @@ npm run dev
 
 Optional: `NEXT_PUBLIC_API_URL` (defaults to `http://localhost:8000`).
 
-The ingest UI is live: ZIP dropzone, GitHub URL form, health badge, and a session list of ingested repos (stored in the browser). Chat against `/repos/{id}/ask` is not wired yet.
+The frontend covers the whole backend API: ingest (ZIP / GitHub URL), repo list, file tree + code viewer, chat against `/repos/{id}/ask`, and the three agents. No auth.
 
 ---
 

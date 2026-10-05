@@ -53,3 +53,45 @@ body {
     transparent 70%
   );
 }
+
+/* Shiki code view */
+.code-view pre.shiki {
+  margin: 0;
+  background: transparent !important;
+  font-family: var(--font-mono), monospace;
+  font-size: 12.5px;
+  line-height: 1.65;
+  counter-reset: line;
+}
+.code-view pre.shiki code {
+  display: block;
+  min-width: max-content;
+}
+.code-view .line {
+  display: inline-block;
+  width: 100%;
+  padding-right: 1rem;
+}
+.code-view .line::before {
+  counter-increment: line;
+  content: counter(line);
+  display: inline-block;
+  width: 3.2rem;
+  padding-right: 1rem;
+  margin-right: 0.5rem;
+  text-align: right;
+  color: #4b5568;
+  user-select: none;
+}
+.code-view .line.hl {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.md-block pre.shiki {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  overflow-x: auto;
+  font-size: 12px;
+  border-radius: 0.75rem;
+  border: 1px solid var(--border);
+}

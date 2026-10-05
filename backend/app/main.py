@@ -1,7 +1,9 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+import anthropic
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
@@ -39,3 +41,9 @@ app.add_middleware(
 
 app.include_router(health.router, tags=["health"])
 app.include_router(repos.router, prefix="/repos", tags=["repos"])
+
+
+@app.exception_handler(anthropic.APIError)
+async def anthropic_error_handler(request: Request, exc: anthropic.APIError):
+    logger.error("Anthropic API error on %s: %s", request.url.path, exc)
+    return JSONResponse(status_code=502, content={"detail": "The language model request failed. Try again."})

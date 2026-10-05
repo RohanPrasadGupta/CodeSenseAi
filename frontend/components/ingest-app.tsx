@@ -1,47 +1,26 @@
 "use client";
 
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useRouter } from "next/navigation";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { GithubForm } from "@/components/github-form";
 import { Header } from "@/components/header";
-import { RepoCard } from "@/components/repo-card";
-import { SessionHistory } from "@/components/session-history";
+import { RepoList } from "@/components/repo-list";
 import { ZipDropzone } from "@/components/zip-dropzone";
 import { ingestFromGithub, uploadZip } from "@/lib/api";
-import {
-  clearSessionRepos,
-  getServerSessionSnapshot,
-  getSessionSnapshot,
-  parseSessionRepos,
-  saveSessionRepo,
-  subscribeSession,
-} from "@/lib/storage";
-import type { Repo } from "@/lib/types";
 
 export function IngestApp() {
-  const [busy, setBusy] = useState<"zip" | "github" | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [latest, setLatest] = useState<Repo | null>(null);
-  const sessionRaw = useSyncExternalStore(
-    subscribeSession,
-    getSessionSnapshot,
-    getServerSessionSnapshot,
-  );
-  const history = useMemo(() => parseSessionRepos(sessionRaw), [sessionRaw]);
-  const selected = latest ?? history[0] ?? null;
+  const router = useRouter();
+  const qc = useQueryClient();
 
-  async function run(kind: "zip" | "github", work: () => Promise<Repo>) {
-    setBusy(kind);
-    setError(null);
-    try {
-      const repo = await work();
-      saveSessionRepo(repo);
-      setLatest(repo);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Ingest failed");
-    } finally {
-      setBusy(null);
-    }
-  }
+  const onSuccess = (repo: { id: string }) => {
+    void qc.invalidateQueries({ queryKey: ["repos"] });
+    router.push(`/repos/${repo.id}`);
+  };
+  const zip = useMutation({ mutationFn: uploadZip, onSuccess });
+  const github = useMutation({ mutationFn: ingestFromGithub, onSuccess });
+
+  const busy = zip.isPending || github.isPending;
+  const error = (zip.error ?? github.error) as Error | null;
 
   return (
     <div className="relative flex min-h-full flex-col overflow-hidden">
@@ -54,59 +33,43 @@ export function IngestApp() {
         <div className="flex flex-col gap-8">
           <section className="max-w-2xl">
             <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-accent-dim">
-              Phase 1 · ingest
+              Ingest · Explore · Ask · Analyse
             </p>
             <h1 className="mt-3 text-4xl font-semibold tracking-tight sm:text-5xl">
-              Bring a codebase in. We parse what we can today.
+              Understand any codebase in minutes.
             </h1>
             <p className="mt-4 max-w-xl text-sm leading-7 text-muted">
-              Upload a ZIP or clone a public GitHub repo. The API returns metadata
-              only — no file tree, chunks, or chat until those routes exist. Keep
-              this id; you cannot fetch the repo again from the frontend.
+              Upload a ZIP or clone a public GitHub repo. CodeSense parses it with Tree-sitter, embeds it for
+              semantic search, then lets you browse files, ask grounded questions, and run AI agents for code
+              review, documentation and architecture.
             </p>
           </section>
 
           <div className="grid gap-4 md:grid-cols-2">
             <section className="rounded-2xl border border-border bg-card p-5">
               <h2 className="text-sm font-semibold">ZIP archive</h2>
-              <p className="mb-4 mt-1 text-xs text-muted">POST /repos/upload</p>
-              <ZipDropzone
-                disabled={busy !== null}
-                onFile={(file) => void run("zip", () => uploadZip(file))}
-              />
-              {busy === "zip" && <BusyNote label="Extracting and parsing ZIP…" />}
+              <p className="mb-4 mt-1 text-xs text-muted">Drop a project folder compressed as .zip</p>
+              <ZipDropzone disabled={busy} onFile={(file) => { github.reset(); zip.mutate(file); }} />
+              {zip.isPending && <BusyNote label="Extracting and parsing…" />}
             </section>
 
             <section className="rounded-2xl border border-border bg-card p-5">
               <h2 className="text-sm font-semibold">GitHub URL</h2>
-              <p className="mb-4 mt-1 text-xs text-muted">POST /repos/from-url</p>
-              <GithubForm
-                disabled={busy !== null}
-                onSubmit={(url) => void run("github", () => ingestFromGithub(url))}
-              />
-              {busy === "github" && <BusyNote label="Cloning (shallow) and parsing…" />}
+              <p className="mb-4 mt-1 text-xs text-muted">Public repositories, shallow clone</p>
+              <GithubForm disabled={busy} onSubmit={(url) => { zip.reset(); github.mutate(url); }} />
+              {github.isPending && <BusyNote label="Cloning and parsing…" />}
             </section>
           </div>
 
           {error && (
             <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
-              {error}
+              {error.message}
             </div>
           )}
-
-          {selected && <RepoCard repo={selected} />}
         </div>
 
         <aside className="flex flex-col gap-4 lg:pt-[7.5rem]">
-          <SessionHistory
-            repos={history}
-            selectedId={selected?.id ?? null}
-            onSelect={setLatest}
-            onClear={() => {
-              clearSessionRepos();
-              setLatest(null);
-            }}
-          />
+          <RepoList />
           <section className="rounded-2xl border border-border bg-card p-5">
             <h2 className="text-sm font-semibold">What ingest skips</h2>
             <ul className="mt-3 space-y-2 text-xs leading-5 text-muted">

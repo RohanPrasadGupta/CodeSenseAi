@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { Providers } from "@/components/providers";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -15,7 +16,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "CodeSense AI",
   description:
-    "Ingest a repository from a ZIP or GitHub URL. CodeSense parses code for later search and Q&A.",
+    "Ingest a repository, browse its code, ask questions, and run AI review, docs and architecture agents.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
@@ -25,7 +26,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">
-        {children}
+        <Providers>{children}</Providers>
       </body>
     </html>
   );

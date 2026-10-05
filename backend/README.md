@@ -19,12 +19,12 @@ This is the API and setup reference for frontend and backend work. Product overv
 | 2 | Tree-sitter parsing — Python, JS, TS, Go → `code_chunks` | Done |
 | 3 | Embeddings + Pinecone (Voyage `voyage-code-3`) | Done |
 | 4 | RAG Q&A — `GET /repos/{id}/ask` | Done |
-| 5 | LangGraph agents (review, architecture, docs) | Upcoming |
-| 6 | React frontend — ingest UI live; chat / file tree / agents not yet | In progress |
+| 5 | LangGraph agents (review, architecture, docs) | Done |
+| 6 | Frontend (Next.js) — ingest, file tree, code viewer, chat, agent panel | Done |
 | 7 | JWT auth, ARQ + Redis, Render + Netlify | Upcoming |
 
-**Usable from a client today:** `GET /health`, `POST /repos/upload`, `POST /repos/from-url`, `GET /repos/{id}/ask`.  
-Files and chunks are written to Postgres but **not exposed** by any read API. No auth.
+**Usable from a client today:** `GET /health`, `POST /repos/upload`, `POST /repos/from-url`, `GET /repos`, `GET /repos/{id}`, `GET /repos/{id}/files`, `GET /repos/{id}/files/content?path=`, `GET /repos/{id}/ask`, and `POST /repos/{id}/agents/{review|docs|architecture}`.  
+Chunks are written to Postgres but not exposed by a read API. No auth.
 
 ---
 
@@ -58,6 +58,9 @@ ENVIRONMENT=development
 CORS_ORIGINS=["http://localhost:3000"]
 
 VOYAGE_API_KEY=
+# Voyage limits (defaults = free tier, no payment method). Raise after adding billing:
+# VOYAGE_RPM=2000
+# VOYAGE_TPM=3000000
 PINECONE_API_KEY=
 PINECONE_INDEX_NAME=
 ANTHROPIC_API_KEY=
@@ -205,7 +208,33 @@ await fetch("http://localhost:8000/repos/from-url", {
 
 ---
 
+### Ingest is asynchronous
+
+`POST /repos/upload` and `/repos/from-url` save files and chunks, then return the repo immediately with `status: "PENDING"`. Embedding runs in a background task, paced by a sliding-window limiter to `VOYAGE_RPM` / `VOYAGE_TPM`, so the free tier never errors — it just takes longer (~10K tokens/min; a 100K-token repo ≈ 12 min). Poll `GET /repos/{id}` until `status` is `INGESTED` (or `FAILED`). Files, file content and agents work while PENDING; `/ask` needs `INGESTED`. If the server restarts mid-embedding the repo stays PENDING — re-ingest it.
+
+### Read endpoints
+
+- `GET /repos` — all repos, newest first
+- `GET /repos/{repo_id}` — one repo (404 if missing)
+- `DELETE /repos/{repo_id}` — removes the repo's Pinecone vectors, `code_chunks`, `repo_files` and the `repos` row (204; 404 if missing). If the vector delete fails the DB rows are kept so it can be retried. Deleting a repo that is still embedding is safe: the background job notices and cleans up its own vectors.
+- `GET /repos/{repo_id}/files` — `[{ file_path, language, size_bytes }]`
+- `GET /repos/{repo_id}/files/content?path=src/app.js` — `{ file_path, language, content }`
+
+### Agents (LangGraph)
+
+Each agent is a small `StateGraph` in `app/agents/`, run on the model set by `AGENT_MODEL` (default `claude-sonnet-5-5`). All are synchronous request/response and can take 10–60s.
+
+| Endpoint | Body | Returns |
+|---|---|---|
+| `POST /repos/{id}/agents/review` | `{ "file_path": "app/x.py" }` | `{ file_path, summary, issues: [{ severity, category, line, title, description, suggestion }] }`, sorted critical → low |
+| `POST /repos/{id}/agents/docs` | `{ "file_path": "app/x.py" }` or `{}` | `{ mode: "file"\|"repo", file_path, documentation }` — file mode returns the source with docstrings added; repo mode returns a README |
+| `POST /repos/{id}/agents/architecture` | none | `{ overview, languages, entry_points, components, dependencies, data_flow, mermaid }` |
+
+`404` for an unknown repo or file. Repos ingested before Phase 5 have no stored file content, so agents fall back to stitching that file's code chunks together.
+
 ### `GET /repos/{repo_id}/ask`
+
+Errors: `404` unknown repo, `409` repo still `PENDING` or `FAILED`, `422` empty/over-long question, `503` embedding provider failed, `502` vector search or LLM failed.
 
 Ask a question about an ingested repo. Query param **`question`** (required).
 
@@ -351,6 +380,7 @@ Pinecone metadata per vector:
 | `file_path` | string | Relative path, e.g. `src/app.js` |
 | `language` | string \| null | From extension; `null` if unknown |
 | `size_bytes` | int | |
+| `content` | text \| null | Full source (null for binary files or repos ingested before migration `a1b2c3d4e5f6`) |
 | `created_at` | timestamptz | |
 
 ### `code_chunks` (not in API responses)
@@ -410,10 +440,13 @@ Unknown extensions get `language: null` (e.g. `package.json`).
 
 ---
 
+## Limits and safeguards
+
+- ZIP uploads: 50 MB compressed, 300 MB / 20,000 entries unzipped (413 beyond that). GitHub clones time out after 120 s.
+- Symlinks, `.env*`, lockfiles, `__MACOSX` and binaries are never ingested.
+- Retrieved code is passed to the model inside `<code_context>` tags and treated as untrusted data.
+
 ## Not available yet (do not call)
 
-- `GET /repos`, `GET /repos/{id}`
-- File tree / file contents endpoints
 - Chunk list endpoints
-- Agent endpoints (Phase 5)
 - Auth, background jobs, progress/status polling (Phase 7)

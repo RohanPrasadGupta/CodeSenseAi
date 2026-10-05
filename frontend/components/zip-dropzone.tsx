@@ -68,7 +68,7 @@ export function ZipDropzone({ disabled, onFile }: ZipDropzoneProps) {
         <p className="text-sm font-medium">Drop a repo ZIP here</p>
         <p className="mt-1 max-w-xs text-xs leading-5 text-muted">
           Field name is <span className="font-mono text-foreground/70">file</span>.
-          Ingest is synchronous — keep this tab open until it finishes.
+          Files are saved immediately; embedding continues in the background.
         </p>
       </button>
       <input

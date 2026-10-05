@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 import tree_sitter_python as tspython
@@ -5,6 +6,9 @@ import tree_sitter_javascript as tsjavascript
 import tree_sitter_go as tsgo
 from tree_sitter import Language, Parser
 import tree_sitter_typescript as tstypescript
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -50,7 +54,9 @@ NODE_TYPES = {
     },
 }
 
-def parse_file(file_path:Path, language:str) -> list[CodeChunk]:
+def parse_file(file_path:Path, language:str, display_path:str | None = None) -> list[CodeChunk]:
+    """Parse a file into chunks. `display_path` (repo-relative) is what gets
+    stored on each chunk; the absolute temp path is only used to read bytes."""
     if language not in LANGUAGES:
         return []
     
@@ -61,7 +67,7 @@ def parse_file(file_path:Path, language:str) -> list[CodeChunk]:
     chunks = extract_chunks(
         tree.root_node,
         source_code,
-        file_path,
+        display_path or str(file_path),
         language,
         )
     
@@ -124,9 +130,7 @@ def extract_chunks(
     
     walk(root_node)
 
-    print("Chunks extracted:", len(chunks))
-    for chunk in chunks:
-        print(f"Chunk: {chunk.name} - {chunk.type} - {chunk.start_line} - {chunk.end_line}")
+    logger.debug("Extracted %d chunks from %s", len(chunks), file_path)
 
     return chunks
     
