@@ -1,6 +1,9 @@
+import json
 from functools import lru_cache
+from typing import Annotated
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -23,7 +26,19 @@ class Settings(BaseSettings):
     AGENT_MODEL: str = "claude-sonnet-5-5"
     QA_MODEL: str = "claude-haiku-4-5"
 
-    CORS_ORIGINS: list[str] = ["http://localhost:3000"]
+    # Env value may be a JSON list or comma-separated: https://a.app,https://b.app
+    CORS_ORIGINS: Annotated[list[str], NoDecode] = [
+        "http://localhost:3000",
+        "https://rpg-codesenseai.netlify.app",
+    ]
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def _parse_origins(cls, v):
+        if isinstance(v, str):
+            v = json.loads(v) if v.strip().startswith("[") else v.split(",")
+        # a trailing slash would never match the browser's Origin header
+        return [o.strip().rstrip("/") for o in v if o.strip()]
 
     model_config = SettingsConfigDict(
         env_file=".env",

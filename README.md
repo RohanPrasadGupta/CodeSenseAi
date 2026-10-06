@@ -142,6 +142,19 @@ The frontend covers the whole backend API: ingest (ZIP / GitHub URL), repo list,
 
 ---
 
+## Deployment
+
+| Part | Host | URL |
+|---|---|---|
+| Backend (FastAPI) | Render | https://codesenseai-u8c8.onrender.com |
+| Frontend (Next.js) | Netlify | https://rpg-codesenseai.netlify.app |
+
+**Render (backend)** — root directory `backend`. Start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`. Run `alembic upgrade head` on deploy (build or pre-deploy command). Environment: everything in `backend/.env.example` — set `DEBUG=false` (it logs every SQL statement), `DATABASE_URL`, the Anthropic / Voyage / Pinecone keys, and `CORS_ORIGINS` (comma-separated or JSON, no trailing slash; the Netlify URL is already a default). Free instances sleep when idle, so the first request after a pause can take ~30–60 s.
+
+**Netlify (frontend)** — base directory `frontend`. `frontend/netlify.toml` sets `NEXT_PUBLIC_API_URL` to the Render URL. It is inlined at **build** time, so changing it needs a redeploy (Netlify → Deploys → Clear cache and deploy).
+
+---
+
 ## Repository layout
 
 ```

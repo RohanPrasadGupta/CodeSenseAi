@@ -10,8 +10,13 @@ import type {
   ReviewResult,
 } from "./types";
 
-export const API_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+// NEXT_PUBLIC_* is inlined at build time, so it must be set when the site is built.
+export const API_URL = (
+  process.env.NEXT_PUBLIC_API_URL ??
+  (process.env.NODE_ENV === "production"
+    ? "https://codesenseai-u8c8.onrender.com"
+    : "http://localhost:8000")
+).replace(/\/$/, "");
 
 export class ApiError extends Error {
   status: number;
